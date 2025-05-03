@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         同济大学自动登录与验证码获取
 // @namespace    http://tampermonkey.net/
-// @version      1.4.1
+// @version      1.4.2
 // @description  使用浏览器自动填充密码时，使得同济大学相关页面可以自动登录，不需要点击登录按钮。支持加强认证自动选择邮箱并监听验证码输入。手动输入密码请勿使用该脚本。
 // @author       gshcpp
 // @match        https://iam.tongji.edu.cn/idp/authcenter/*
@@ -31,7 +31,7 @@
 			authMethodSelectXPath: '//*[@id="sel_auth_method"]',
 			sendVerifyCodeButtonXPath: '//*[@id="smsBtn"]',
 			verifyCodeInputXPath: '//*[@id="authcode"]',
-			verifyCodeSubmitButtonXPath: '//*[@class="white loginBt" and @type="button]'
+			verifyCodeSubmitButtonXPath: '//*[@class="white loginBt" and @type="button"]'
 		},
 		'mail.tongji.edu.cn': {
 			usernameFieldXPath: '//*[@id="uid"]',
@@ -55,10 +55,9 @@
 			if (verifyCodeInput) {
 				console.log('找到验证码输入框，添加监听');
 				
-				// 监听输入事件
-				verifyCodeInput.addEventListener('input', function() {
-					// 当输入6位数字时自动点击提交按钮
-					if (this.value && this.value.length === 6 && /^\d{6}$/.test(this.value)) {
+				// 验证码自动提交函数
+				const submitVerifyCode = function() {
+					if (verifyCodeInput.value && verifyCodeInput.value.length === 6 && /^\d{6}$/.test(verifyCodeInput.value)) {
 						console.log('验证码已输入6位，准备提交');
 						
 						// 点击提交按钮
@@ -66,8 +65,19 @@
 						if (verifyCodeSubmitButton) {
 							console.log('自动点击提交按钮');
 							verifyCodeSubmitButton.click();
+						} else {
+							console.warn('未找到验证码提交按钮');
 						}
 					}
+				};
+				
+				// 监听输入事件
+				verifyCodeInput.addEventListener('input', submitVerifyCode);
+				
+				// 监听粘贴事件
+				verifyCodeInput.addEventListener('paste', function() {
+					// 粘贴后内容需要时间生效，延迟检查
+					setTimeout(submitVerifyCode, 50);
 				});
 			} else {
 				// 如果未找到输入框，稍后再试
