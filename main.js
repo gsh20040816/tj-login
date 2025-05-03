@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         同济大学自动登录与验证码获取
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.4.1
 // @description  使用浏览器自动填充密码时，使得同济大学相关页面可以自动登录，不需要点击登录按钮。支持加强认证自动选择邮箱并监听验证码输入。手动输入密码请勿使用该脚本。
 // @author       gshcpp
 // @match        https://iam.tongji.edu.cn/idp/authcenter/*
