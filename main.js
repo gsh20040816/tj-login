@@ -31,7 +31,7 @@
 			authMethodSelectXPath: '//*[@id="sel_auth_method"]',
 			sendVerifyCodeButtonXPath: '//*[@id="smsBtn"]',
 			verifyCodeInputXPath: '//*[@id="authcode"]',
-			verifyCodeSubmitButtonXPath: '/html/body/div[13]/div[2]/div[3]/div/div/form/button'
+			verifyCodeSubmitButtonXPath: '//*[@class="white loginBt" and @type="button]'
 		},
 		'mail.tongji.edu.cn': {
 			usernameFieldXPath: '//*[@id="uid"]',
