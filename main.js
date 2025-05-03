@@ -31,7 +31,7 @@
 			authMethodSelectXPath: '//*[@id="sel_auth_method"]',
 			sendVerifyCodeButtonXPath: '//*[@id="smsBtn"]',
 			verifyCodeInputXPath: '//*[@id="authcode"]',
-			verifyCodeSubmitButtonXPath: '//*[@class="white loginBt" and @type="button"]'
+			verifyCodeSubmitButtonXPath: '//*[@class="white loginBt" and @type="button" and onclick="validateLoginFieldSMS(\'authen4Form\')"]'
 		},
 		'mail.tongji.edu.cn': {
 			usernameFieldXPath: '//*[@id="uid"]',
