@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         同济大学自动登录与验证码获取
 // @namespace    http://tampermonkey.net/
-// @version      1.4.2
+// @version      1.4.3
 // @description  使用浏览器自动填充密码时，使得同济大学相关页面可以自动登录，不需要点击登录按钮。支持加强认证自动选择邮箱并监听验证码输入。手动输入密码请勿使用该脚本。
 // @author       gshcpp
 // @match        https://iam.tongji.edu.cn/idp/authcenter/*
@@ -16,10 +16,15 @@
 	// 定义延迟常量
 	const CHECK_INTERVAL_MS = 100;
 	const VERIFY_CHECK_INTERVAL_MS = 500;
+	const AUTH_VERIFICATION_MAX_CHECKS = 40;
 
 	// 标记变量，用于控制验证码流程
 	let isAuthTabOpened = false;
 	let isVerifyCodeTabOpening = false;
+	let hasSubmittedLogin = false;
+	let hasSentVerifyCode = false;
+	let isMonitoringVerifyCodeInput = false;
+	let authVerificationCheckCount = 0;
 
 	// 网站和XPath对应的列表
 	const siteXPaths = {
@@ -28,6 +33,7 @@
 			passwordFieldXPath: '//*[@id="j_password"]',
 			loginButtonXPath: '//*[@id="loginButton"]',
 			// 加强认证相关XPath
+			authVerificationFormXPath: '//*[@id="authen4Form" or @name="authen4Form"]',
 			authMethodSelectXPath: '//*[@id="sel_auth_method"]',
 			sendVerifyCodeButtonXPath: '//*[@id="smsBtn"]',
 			verifyCodeInputXPath: '//*[@id="authcode"]',
@@ -47,13 +53,71 @@
 	// 选择当前网站的XPath配置
 	const currentSiteXPath = siteXPaths[currentDomain];
 
+	function getFirstElementByXPath(xpath) {
+		return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+	}
+
+	function isElementVisible(element) {
+		if (!element || !(element instanceof Element) || element.hidden) {
+			return false;
+		}
+
+		const style = window.getComputedStyle(element);
+		if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+			return false;
+		}
+
+		return element.offsetParent !== null || element.getClientRects().length > 0;
+	}
+
+	function isElementEnabled(element) {
+		return !!element && !element.disabled && element.getAttribute('aria-disabled') !== 'true';
+	}
+
+	function isElementActionable(element) {
+		return isElementVisible(element) && isElementEnabled(element);
+	}
+
+	function triggerAutofillEvents(element) {
+		element.dispatchEvent(new Event('input', { bubbles: true }));
+		element.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
+	function isAuthVerificationPage() {
+		if (currentDomain !== 'iam.tongji.edu.cn' || !currentSiteXPath) {
+			return false;
+		}
+
+		const loginButton = getFirstElementByXPath(currentSiteXPath.loginButtonXPath);
+		if (isElementVisible(loginButton)) {
+			return false;
+		}
+
+		const authVerificationForm = getFirstElementByXPath(currentSiteXPath.authVerificationFormXPath);
+		const authMethodSelect = getFirstElementByXPath(currentSiteXPath.authMethodSelectXPath);
+		const verifyCodeInput = getFirstElementByXPath(currentSiteXPath.verifyCodeInputXPath);
+		const verifyCodeSubmitButton = getFirstElementByXPath(currentSiteXPath.verifyCodeSubmitButtonXPath);
+
+		return isElementVisible(authVerificationForm) ||
+			(isElementVisible(authMethodSelect) && isElementVisible(verifyCodeInput) && isElementVisible(verifyCodeSubmitButton));
+	}
+
 	// 监听验证码输入框
 	function monitorVerifyCodeInput() {
+		if (isMonitoringVerifyCodeInput) {
+			return;
+		}
+
 		if (currentDomain === 'iam.tongji.edu.cn') {
-			const verifyCodeInput = document.evaluate(currentSiteXPath.verifyCodeInputXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+			if (!isAuthVerificationPage()) {
+				return;
+			}
+
+			const verifyCodeInput = getFirstElementByXPath(currentSiteXPath.verifyCodeInputXPath);
 			
-			if (verifyCodeInput) {
+			if (isElementVisible(verifyCodeInput)) {
 				console.log('找到验证码输入框，添加监听');
+				isMonitoringVerifyCodeInput = true;
 				
 				// 验证码自动提交函数
 				const submitVerifyCode = function() {
@@ -61,8 +125,8 @@
 						console.log('验证码已输入6位，准备提交');
 						
 						// 点击提交按钮
-						const verifyCodeSubmitButton = document.evaluate(currentSiteXPath.verifyCodeSubmitButtonXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-						if (verifyCodeSubmitButton) {
+						const verifyCodeSubmitButton = getFirstElementByXPath(currentSiteXPath.verifyCodeSubmitButtonXPath);
+						if (isElementActionable(verifyCodeSubmitButton)) {
 							console.log('自动点击提交按钮');
 							verifyCodeSubmitButton.click();
 						} else {
@@ -88,41 +152,64 @@
 
 	// 处理加强认证页面
 	function handleAuthVerification() {
-		// 检查是否在认证页面
-		const authMethodSelect = document.evaluate(currentSiteXPath.authMethodSelectXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-		
-		if (authMethodSelect) {
-			// 选择邮箱选项
-			// 遍历select中的option，找到包含"邮箱"的选项
-			for (let i = 0; i < authMethodSelect.options.length; i++) {
-				if (authMethodSelect.options[i].textContent.includes('邮箱')) {
-					authMethodSelect.selectedIndex = i;
-					// 触发change事件
-					const event = new Event('change', { bubbles: true });
-					authMethodSelect.dispatchEvent(event);
-					break;
-				}
+		if (currentDomain !== 'iam.tongji.edu.cn' || !currentSiteXPath) {
+			return;
+		}
+
+		if (!isAuthVerificationPage()) {
+			if (hasSubmittedLogin && authVerificationCheckCount < AUTH_VERIFICATION_MAX_CHECKS) {
+				authVerificationCheckCount++;
+				setTimeout(handleAuthVerification, VERIFY_CHECK_INTERVAL_MS);
 			}
-			
-			// 点击发送验证码按钮
-			const sendVerifyCodeButton = document.evaluate(currentSiteXPath.sendVerifyCodeButtonXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-			if (sendVerifyCodeButton) {
-				sendVerifyCodeButton.click();
-				
-				// 在新标签页中打开邮箱（仅打开一次）
-				if (!isAuthTabOpened && !isVerifyCodeTabOpening) {
-					isVerifyCodeTabOpening = true;
-					setTimeout(() => {
-						window.open('https://mail.tongji.edu.cn/', '_blank');
-						isAuthTabOpened = true;
-						isVerifyCodeTabOpening = false;
-					}, 1000);
+			return;
+		}
+
+		// 检查是否在认证页面
+		const authMethodSelect = getFirstElementByXPath(currentSiteXPath.authMethodSelectXPath);
+		if (!isElementVisible(authMethodSelect)) {
+			setTimeout(handleAuthVerification, VERIFY_CHECK_INTERVAL_MS);
+			return;
+		}
+
+		// 选择邮箱选项
+		let hasEmailAuthMethod = false;
+		for (let i = 0; i < authMethodSelect.options.length; i++) {
+			if (authMethodSelect.options[i].textContent.includes('邮箱')) {
+				hasEmailAuthMethod = true;
+				if (authMethodSelect.selectedIndex !== i) {
+					authMethodSelect.selectedIndex = i;
+					authMethodSelect.dispatchEvent(new Event('change', { bubbles: true }));
 				}
-				
-				// 开始监听验证码输入框
-				setTimeout(monitorVerifyCodeInput, 1000);
+				break;
 			}
 		}
+
+		if (!hasEmailAuthMethod) {
+			console.warn('未找到邮箱验证选项');
+			return;
+		}
+
+		// 点击发送验证码按钮
+		const sendVerifyCodeButton = getFirstElementByXPath(currentSiteXPath.sendVerifyCodeButtonXPath);
+		if (!hasSentVerifyCode && isElementActionable(sendVerifyCodeButton)) {
+			sendVerifyCodeButton.click();
+			hasSentVerifyCode = true;
+
+			// 在新标签页中打开邮箱（仅打开一次）
+			if (!isAuthTabOpened && !isVerifyCodeTabOpening) {
+				isVerifyCodeTabOpening = true;
+				setTimeout(() => {
+					window.open('https://mail.tongji.edu.cn/', '_blank');
+					isAuthTabOpened = true;
+					isVerifyCodeTabOpening = false;
+				}, 1000);
+			}
+		} else if (!hasSentVerifyCode && !sendVerifyCodeButton) {
+			setTimeout(handleAuthVerification, VERIFY_CHECK_INTERVAL_MS);
+		}
+
+		// 开始监听验证码输入框
+		setTimeout(monitorVerifyCodeInput, 1000);
 	}
 
 	// 检测自动填充的函数
@@ -132,18 +219,39 @@
 			return;
 		}
 
+		if (currentDomain === 'iam.tongji.edu.cn' && isAuthVerificationPage()) {
+			handleAuthVerification();
+			return;
+		}
+
+		if (hasSubmittedLogin) {
+			if (currentDomain === 'iam.tongji.edu.cn') {
+				setTimeout(handleAuthVerification, VERIFY_CHECK_INTERVAL_MS);
+			}
+			return;
+		}
+
 		// 获取用户名输入框
-		var usernameField = document.evaluate(currentSiteXPath.usernameFieldXPath, document, null, XPathResult.ANY_TYPE, null).iterateNext();
+		var usernameField = getFirstElementByXPath(currentSiteXPath.usernameFieldXPath);
 		// 获取密码输入框
-		var passwordField = document.evaluate(currentSiteXPath.passwordFieldXPath, document, null, XPathResult.ANY_TYPE, null).iterateNext();
+		var passwordField = getFirstElementByXPath(currentSiteXPath.passwordFieldXPath);
 		// 获取登录按钮
-		var loginButton = document.evaluate(currentSiteXPath.loginButtonXPath, document, null, XPathResult.ANY_TYPE, null).iterateNext();
+		var loginButton = getFirstElementByXPath(currentSiteXPath.loginButtonXPath);
 
 		// 如果用户名输入框、密码输入框和登录按钮都存在
-		if (usernameField && passwordField && loginButton) {
+		if (isElementVisible(usernameField) && isElementVisible(passwordField) && isElementVisible(loginButton)) {
 			// 检查用户名和密码输入框是否被自动填充
 			if (usernameField.value !== '' && passwordField.value !== '') {
+				triggerAutofillEvents(usernameField);
+				triggerAutofillEvents(passwordField);
+
+				if (!isElementActionable(loginButton)) {
+					setTimeout(checkAutofill, CHECK_INTERVAL_MS);
+					return;
+				}
+
 				// 点击登录按钮
+				hasSubmittedLogin = true;
 				loginButton.click();
 				
 				// 如果是统一认证页面，等待可能出现的加强认证
@@ -166,8 +274,6 @@
 		setTimeout(checkAutofill, CHECK_INTERVAL_MS);
 		// 检查是否已经在加强认证页面
 		setTimeout(handleAuthVerification, 1000);
-		// 监听验证码输入
-		setTimeout(monitorVerifyCodeInput, 1500);
 	} else if (currentDomain === 'mail.tongji.edu.cn') {
 		// 只在邮箱页面执行自动登录
 		setTimeout(checkAutofill, CHECK_INTERVAL_MS);

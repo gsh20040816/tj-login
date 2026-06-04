@@ -1,6 +1,6 @@
 # 同济大学自动登录与验证码获取
 
-![版本](https://img.shields.io/badge/版本-1.4.1-blue)
+![版本](https://img.shields.io/badge/版本-1.4.3-blue)
 ![许可证](https://img.shields.io/badge/许可证-GPL3-green)
 
 ## 功能介绍
