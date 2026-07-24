@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         同济大学自动登录与验证码获取
 // @namespace    http://tampermonkey.net/
-// @version      1.4.3
+// @version      1.4.4
 // @description  使用浏览器自动填充密码时，使得同济大学相关页面可以自动登录，不需要点击登录按钮。支持加强认证自动选择邮箱并监听验证码输入。手动输入密码请勿使用该脚本。
 // @author       gshcpp
 // @match        https://iam.tongji.edu.cn/idp/authcenter/*
@@ -15,6 +15,7 @@
 
 	// 定义延迟常量
 	const CHECK_INTERVAL_MS = 100;
+	const LOGIN_CLICK_DELAY_MS = 100;
 	const VERIFY_CHECK_INTERVAL_MS = 500;
 	const AUTH_VERIFICATION_MAX_CHECKS = 40;
 
@@ -25,6 +26,7 @@
 	let hasSentVerifyCode = false;
 	let isMonitoringVerifyCodeInput = false;
 	let authVerificationCheckCount = 0;
+	let isLoginScheduled = false;
 
 	// 网站和XPath对应的列表
 	const siteXPaths = {
@@ -76,11 +78,6 @@
 
 	function isElementActionable(element) {
 		return isElementVisible(element) && isElementEnabled(element);
-	}
-
-	function triggerAutofillEvents(element) {
-		element.dispatchEvent(new Event('input', { bubbles: true }));
-		element.dispatchEvent(new Event('change', { bubbles: true }));
 	}
 
 	function isAuthVerificationPage() {
@@ -242,22 +239,27 @@
 		if (isElementVisible(usernameField) && isElementVisible(passwordField) && isElementVisible(loginButton)) {
 			// 检查用户名和密码输入框是否被自动填充
 			if (usernameField.value !== '' && passwordField.value !== '') {
-				triggerAutofillEvents(usernameField);
-				triggerAutofillEvents(passwordField);
-
-				if (!isElementActionable(loginButton)) {
-					setTimeout(checkAutofill, CHECK_INTERVAL_MS);
+				if (isLoginScheduled) {
 					return;
 				}
 
-				// 点击登录按钮
-				hasSubmittedLogin = true;
-				loginButton.click();
-				
-				// 如果是统一认证页面，等待可能出现的加强认证
-				if (currentDomain === 'iam.tongji.edu.cn') {
-					setTimeout(handleAuthVerification, 1000);
-				}
+				isLoginScheduled = true;
+				setTimeout(() => {
+					if (usernameField.value === '' || passwordField.value === '' || !isElementActionable(loginButton)) {
+						isLoginScheduled = false;
+						setTimeout(checkAutofill, CHECK_INTERVAL_MS);
+						return;
+					}
+
+					// 点击登录按钮
+					hasSubmittedLogin = true;
+					loginButton.click();
+
+					// 如果是统一认证页面，等待可能出现的加强认证
+					if (currentDomain === 'iam.tongji.edu.cn') {
+						setTimeout(handleAuthVerification, 1000);
+					}
+				}, LOGIN_CLICK_DELAY_MS);
 			} else {
 				// 如果没有被自动填充，再次检查
 				setTimeout(checkAutofill, CHECK_INTERVAL_MS);
